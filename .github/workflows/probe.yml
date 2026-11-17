@@ -1,0 +1,47 @@
+name: Probe CF Reverse Proxy IPs
+
+# 读取仓库根目录 ip.txt 里的 CIDR，调用 Cloudflare Worker（Check_Proxy.js）
+# 批量探测「哪些 IP:端口 能反代 CF、出口落在哪里」，结果提交回仓库。
+
+on:
+  workflow_dispatch:
+  # 需要定时巡检时取消注释
+  # schedule:
+  #   - cron: '0 2 * * *'   # 每天 UTC 02:00（北京时间 10:00）
+
+permissions:
+  contents: write
+
+# 同一时间只跑一个，避免两次运行互相覆盖结果
+concurrency:
+  group: probe-cf
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 执行探测
+        run: python3 probe_ip.py --input ip.txt --best bestip_worker.txt
+
+      - name: 提交并推送结果
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -- bestip_worker.txt
+          if git diff --staged --quiet; then
+            echo "结果无变化，跳过提交"
+          else
+            git commit -m "auto: update probe results"
+            git push
+          fi
